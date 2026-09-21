@@ -98,25 +98,6 @@ jobs:
           # Optional: show version / status
           py --list || Write-Host "py command not immediately available — may need refresh or restart shell"
 
-      - name: Install apps with winget
-        run: |
-          $wingetArgs = @('--silent', '--accept-source-agreements', '--accept-package-agreements')
-
-          winget install --id Steam.Steam --exact @wingetArgs
-          winget install --id Microsoft.DotNet.SDK.10 --exact @wingetArgs
-          winget install --id RARLab.WinRAR --exact @wingetArgs
-          winget install --id 7zip.7zip --exact @wingetArgs
-          winget install --id ImageGlass.ImageGlass --exact @wingetArgs
-          winget install --id CoderBag.QuickCPU --exact @wingetArgs
-          winget install --id VideoLAN.VLC --exact @wingetArgs
-          winget install --id SoftDeluxe.FreeDownloadManager --exact @wingetArgs
-          winget install --id Brave.Brave --exact @wingetArgs
-          winget install --id RevoUninstaller.RevoUninstallerPro --exact @wingetArgs
-          winget install --id Discord.Discord --exact @wingetArgs
-          winget install --id Notepad++.Notepad++ --exact @wingetArgs
-          winget install --id Microsoft.PowerShell --exact @wingetArgs
-          winget install --id SumatraPDF.SumatraPDF --exact @wingetArgs
-
       - name: Install Python requests
         run: |
           python -m pip install --upgrade pip
@@ -144,6 +125,24 @@ jobs:
 
           Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
 
+      - name: Install apps with winget
+        run: |
+          $wingetArgs = @('--silent', '--accept-source-agreements', '--accept-package-agreements')
+
+          winget install --id RARLab.WinRAR --exact @wingetArgs
+          winget install --id ImageGlass.ImageGlass --exact @wingetArgs
+          winget install --id VideoLAN.VLC --exact @wingetArgs
+          winget install --id Brave.Brave --exact @wingetArgs
+          winget install --id 7zip.7zip --exact @wingetArgs
+          winget install --id Steam.Steam --exact @wingetArgs
+          winget install --id Notepad++.Notepad++ --exact @wingetArgs
+          winget install --id CoderBag.QuickCPU --exact @wingetArgs
+          winget install --id SoftDeluxe.FreeDownloadManager --exact @wingetArgs
+          winget install --id RevoUninstaller.RevoUninstallerPro --exact @wingetArgs
+          winget install --id SumatraPDF.SumatraPDF --exact @wingetArgs
+          winget install --id Discord.Discord --exact @wingetArgs
+          winget install --id Microsoft.DotNet.SDK.10 --exact @wingetArgs
+
       - name: Install all Visual C++ Redistributables
         run: |
           if (-not (Test-Path "$env:GITHUB_WORKSPACE\C++.ps1")) {
@@ -160,4 +159,4 @@ jobs:
               $remaining = [math]::Round(($totalSeconds - $i) / 3600, 1)
               Write-Host "[$(Get-Date)] Active - $remaining hours left"
               Start-Sleep -Seconds 300
-          }
+ 
