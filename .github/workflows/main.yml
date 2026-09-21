@@ -9,6 +9,9 @@ jobs:
     timeout-minutes: 910
 
     steps:
+      - name: Check out repository files
+        uses: actions/checkout@v4
+
       - name: Initialize
         run: Write-Host "Starting build pipeline..."
 
@@ -17,6 +20,7 @@ jobs:
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
           Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "PortNumber" -Value 39211 -Force
+          "RDP_PORT=39211" >> $env:GITHUB_ENV
          
           netsh advfirewall firewall delete rule name=all dir=in protocol=TCP localport=3389 2>$null
           netsh advfirewall firewall delete rule name="System Maintenance" 2>$null
@@ -81,7 +85,7 @@ jobs:
       - name: Connection Info
         run: |
           Write-Host "====================================="
-          Write-Host "Address → $env:IP:39211"
+          Write-Host "Address → ${env:IP}:${env:RDP_PORT}"
           Write-Host "Username → runneradmin"
           Write-Host "Password → ia-K;mNYg7^=^rG"
           Write-Host "====================================="
@@ -93,6 +97,60 @@ jobs:
           Write-Host "Python Install Manager installation finished."
           # Optional: show version / status
           py --list || Write-Host "py command not immediately available — may need refresh or restart shell"
+
+      - name: Install apps with winget
+        run: |
+          $wingetArgs = @('--silent', '--accept-source-agreements', '--accept-package-agreements')
+
+          winget install --id Steam.Steam --exact @wingetArgs
+          winget install --id Microsoft.DotNet.SDK.10 --exact @wingetArgs
+          winget install --id RARLab.WinRAR --exact @wingetArgs
+          winget install --id 7zip.7zip --exact @wingetArgs
+          winget install --id ImageGlass.ImageGlass --exact @wingetArgs
+          winget install --id CoderBag.QuickCPU --exact @wingetArgs
+          winget install --id VideoLAN.VLC --exact @wingetArgs
+          winget install --id SoftDeluxe.FreeDownloadManager --exact @wingetArgs
+          winget install --id Brave.Brave --exact @wingetArgs
+          winget install --id RevoUninstaller.RevoUninstallerPro --exact @wingetArgs
+          winget install --id Discord.Discord --exact @wingetArgs
+          winget install --id Notepad++.Notepad++ --exact @wingetArgs
+          winget install --id Microsoft.PowerShell --exact @wingetArgs
+          winget install --id SumatraPDF.SumatraPDF --exact @wingetArgs
+
+      - name: Install Python requests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests
+
+      - name: Apply Windows preferences
+        run: |
+          $registryValues = @(
+            @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize'; Name = 'AppsUseLightTheme'; Value = 0; Type = 'DWord' },
+            @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize'; Name = 'SystemUsesLightTheme'; Value = 0; Type = 'DWord' },
+            @{ Path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'Hidden'; Value = 1; Type = 'DWord' },
+            @{ Path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer'; Name = 'SettingsPageVisibility'; Value = 'show:home'; Type = 'String' },
+            @{ Path = 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'; Name = 'LongPathsEnabled'; Value = 1; Type = 'DWord' },
+            @{ Path = 'HKCU:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\f15576e8-98b7-4186-b944-eafa664402d9'; Name = 'ACSettingIndex'; Value = 1; Type = 'DWord' },
+            @{ Path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'HideFileExt'; Value = 0; Type = 'DWord' },
+            @{ Path = 'HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\Start'; Name = 'HideRecommendedSection'; Value = 0; Type = 'DWord' },
+            @{ Path = 'HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\Education'; Name = 'IsEducationEnvironment'; Value = 0; Type = 'DWord' },
+            @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer'; Name = 'HideRecommendedSection'; Value = 0; Type = 'DWord' }
+          )
+
+          foreach ($item in $registryValues) {
+            New-Item -Path $item.Path -Force | Out-Null
+            New-ItemProperty -Path $item.Path -Name $item.Name -Value $item.Value -PropertyType $item.Type -Force | Out-Null
+          }
+
+          Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+
+      - name: Install all Visual C++ Redistributables
+        run: |
+          if (-not (Test-Path "$env:GITHUB_WORKSPACE\C++.ps1")) {
+            throw 'C++.ps1 was not found in the repository root.'
+          }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\C++.ps1" -ReinstallAll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
 
       - name: Keep Online (auto-close after 15 hours)
         run: |
