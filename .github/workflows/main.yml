@@ -13,20 +13,42 @@ jobs:
         uses: actions/checkout@v4
 
       - name: Initialize
-        run: Write-Host "Starting build pipeline..."
+        shell: powershell
+        run: |
+          Write-Host "Starting build pipeline..."
 
       - name: Configure System Access
         shell: powershell
         run: |
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
-          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "PortNumber" -Value 39211 -Force
+          Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' `
+            -Name "fDenyTSConnections" `
+            -Value 0 `
+            -Force
+
+          Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+            -Name "UserAuthentication" `
+            -Value 1 `
+            -Force
+
+          Set-ItemProperty `
+            -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' `
+            -Name "PortNumber" `
+            -Value 39211 `
+            -Force
 
           "RDP_PORT=39211" >> $env:GITHUB_ENV
 
           netsh advfirewall firewall delete rule name=all dir=in protocol=TCP localport=3389 2>$null
           netsh advfirewall firewall delete rule name="System Maintenance" 2>$null
-          netsh advfirewall firewall add rule name="System Maintenance" dir=in action=allow protocol=TCP localport=39211
+
+          netsh advfirewall firewall add rule `
+            name="System Maintenance" `
+            dir=in `
+            action=allow `
+            protocol=TCP `
+            localport=39211
 
           Restart-Service TermService -Force
 
@@ -46,31 +68,30 @@ jobs:
           $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.94.2-amd64.msi"
           $path = "$env:TEMP\ts.msi"
 
-          Invoke-WebRequest -Uri $url -OutFile $path
+          Invoke-WebRequest `
+            -Uri $url `
+            -OutFile $path
 
-          Start-Process msiexec.exe `
+          Start-Process `
+            msiexec.exe `
             -ArgumentList "/i `"$path`" /quiet /norestart" `
             -Wait
 
           Remove-Item $path -Force
 
-      - name: Connect Network (DEBUG MODE)
+      - name: Connect Network
         shell: powershell
         run: |
-          Write-Host "=== TAILSCALE DEBUG START ==="
+          Write-Host "=== TAILSCALE START ==="
 
           $key = "${{ secrets.TAILSCALE_AUTH_KEY }}"
 
-          Write-Host "Auth key length: $($key.Length) characters"
-
           if ($key.Length -lt 10) {
-              Write-Host "ERROR: Auth key is empty or too short! Update the secret."
+              Write-Host "ERROR: Auth key is empty or too short."
               exit 1
           }
 
           & "$env:ProgramFiles\Tailscale\tailscale.exe" logout 2>$null
-
-          Write-Host "Running tailscale up..."
 
           $upResult = & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
             --authkey="${{ secrets.TAILSCALE_AUTH_KEY }}" `
@@ -84,11 +105,10 @@ jobs:
           Write-Host "Tailscale status:"
           & "$env:ProgramFiles\Tailscale\tailscale.exe" status
 
-          Write-Host "Trying to get IP..."
-
           $ip = $null
 
           for ($i = 1; $i -le 12; $i++) {
+
               Start-Sleep -Seconds 5
 
               $ip = (& "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4).Trim()
@@ -108,7 +128,7 @@ jobs:
 
           echo "IP=$ip" >> $env:GITHUB_ENV
 
-          Write-Host "=== TAILSCALE DEBUG END ==="
+          Write-Host "=== TAILSCALE END ==="
 
       - name: Connection Info
         shell: powershell
@@ -122,20 +142,17 @@ jobs:
       - name: Install Python Install Manager
         shell: powershell
         run: |
-          Write-Host "Installing Python Install Manager via winget..."
+          Write-Host "Installing Python Install Manager..."
 
           winget install 9NQ7512CXL7T `
             --silent `
             --accept-source-agreements `
-            --accept-package-agreements
+            --accept-package-agreements `
+            --disable-interactivity
 
           Write-Host "Python Install Manager installation finished."
 
           py --list
-
-          if ($LASTEXITCODE -ne 0) {
-              Write-Host "py command is not immediately available."
-          }
 
       - name: Install Python requests
         shell: powershell
@@ -210,7 +227,10 @@ jobs:
           )
 
           foreach ($item in $registryValues) {
-              New-Item -Path $item.Path -Force | Out-Null
+
+              New-Item `
+                -Path $item.Path `
+                -Force | Out-Null
 
               New-ItemProperty `
                 -Path $item.Path `
@@ -220,11 +240,19 @@ jobs:
                 -Force | Out-Null
           }
 
-          Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+          Stop-Process `
+            -Name explorer `
+            -Force `
+            -ErrorAction SilentlyContinue
+
+      # ==========================================
+      # WINGET APPS
+      # ==========================================
 
       - name: Install apps with winget
         shell: powershell
         run: |
+
           $apps = @(
             "RARLab.WinRAR",
             "ImageGlass.ImageGlass",
@@ -238,13 +266,16 @@ jobs:
             "RevoUninstaller.RevoUninstallerPro",
             "SumatraPDF.SumatraPDF",
             "Discord.Discord",
+            "Microsoft.DotNet.SDK.8",
             "Microsoft.DotNet.SDK.10"
           )
 
           $wingetPath = (Get-Command winget.exe -ErrorAction Stop).Source
 
-          Write-Host "Winget path: $wingetPath"
-          Write-Host "Total apps: $($apps.Count)"
+          Write-Host "============================================"
+          Write-Host "WINGET INSTALLATION"
+          Write-Host "Total applications: $($apps.Count)"
+          Write-Host "============================================"
 
           $failedApps = @()
 
@@ -257,7 +288,9 @@ jobs:
               Write-Host "BATCH $batchNumber"
               Write-Host "============================================"
 
-              $batch = @($apps[$i])
+              $batch = @(
+                  $apps[$i]
+              )
 
               if (($i + 1) -lt $apps.Count) {
                   $batch += $apps[$i + 1]
@@ -277,8 +310,15 @@ jobs:
                     $env:RUNNER_TEMP `
                     "winget-$safeName-error.txt"
 
-                  Remove-Item $stdoutFile -Force -ErrorAction SilentlyContinue
-                  Remove-Item $stderrFile -Force -ErrorAction SilentlyContinue
+                  Remove-Item `
+                    $stdoutFile `
+                    -Force `
+                    -ErrorAction SilentlyContinue
+
+                  Remove-Item `
+                    $stderrFile `
+                    -Force `
+                    -ErrorAction SilentlyContinue
 
                   $arguments = @(
                     "install"
@@ -302,10 +342,10 @@ jobs:
                     -RedirectStandardError $stderrFile
 
                   $processes += [PSCustomObject]@{
-                    App = $app
-                    Process = $process
-                    StdOut = $stdoutFile
-                    StdErr = $stderrFile
+                      App = $app
+                      Process = $process
+                      StdOut = $stdoutFile
+                      StdErr = $stderrFile
                   }
               }
 
@@ -325,7 +365,11 @@ jobs:
                   Write-Host "--------------------------------------------"
 
                   if (Test-Path $item.StdOut) {
-                      $output = Get-Content $item.StdOut -Raw -ErrorAction SilentlyContinue
+
+                      $output = Get-Content `
+                        $item.StdOut `
+                        -Raw `
+                        -ErrorAction SilentlyContinue
 
                       if ($output) {
                           Write-Host $output
@@ -333,7 +377,11 @@ jobs:
                   }
 
                   if (Test-Path $item.StdErr) {
-                      $errorOutput = Get-Content $item.StdErr -Raw -ErrorAction SilentlyContinue
+
+                      $errorOutput = Get-Content `
+                        $item.StdErr `
+                        -Raw `
+                        -ErrorAction SilentlyContinue
 
                       if ($errorOutput) {
                           Write-Host $errorOutput
@@ -341,10 +389,13 @@ jobs:
                   }
 
                   if ($exitCode -ne 0) {
+
                       $failedApps += $item.App
+
                       Write-Host "WARNING: $($item.App) failed."
                   }
                   else {
+
                       Write-Host "SUCCESS: $($item.App)"
                   }
               }
@@ -352,17 +403,36 @@ jobs:
               Write-Host ""
               Write-Host "Batch $batchNumber completed."
 
+              # تنظيف Discord بعد انتهاء دفعة التثبيت
+              Get-Process Discord `
+                -ErrorAction SilentlyContinue |
+                Stop-Process `
+                -Force `
+                -ErrorAction SilentlyContinue
+
+              # انتظار 20 ثانية قبل الدفعة التالية
               if (($i + 2) -lt $apps.Count) {
 
                   Write-Host ""
-                  Write-Host "Next batch starts after 20 seconds..."
+                  Write-Host "============================================"
+                  Write-Host "WAITING 20 SECONDS"
+                  Write-Host "============================================"
 
                   for ($seconds = 20; $seconds -gt 0; $seconds--) {
-                      Write-Host "Starting next batch in $seconds seconds..."
+
+                      Write-Host "Next batch in $seconds seconds..."
+
                       Start-Sleep -Seconds 1
                   }
               }
           }
+
+          # تنظيف Discord مرة أخيرة
+          Get-Process Discord `
+            -ErrorAction SilentlyContinue |
+            Stop-Process `
+            -Force `
+            -ErrorAction SilentlyContinue
 
           Write-Host ""
           Write-Host "============================================"
@@ -373,7 +443,7 @@ jobs:
 
               Write-Host ""
               Write-Host "Failed applications:"
-              
+
               foreach ($failed in $failedApps) {
                   Write-Host " - $failed"
               }
@@ -381,13 +451,16 @@ jobs:
               exit 1
           }
 
-          Write-Host "All applications installed successfully."
+          Write-Host "All applications processed successfully."
 
       - name: Install all Visual C++ Redistributables
         shell: powershell
         run: |
+
           if (-not (Test-Path "$env:GITHUB_WORKSPACE\C++.ps1")) {
-            throw 'C++.ps1 was not found in the repository root.'
+
+              throw `
+                'C++.ps1 was not found in the repository root.'
           }
 
           & powershell.exe `
@@ -400,21 +473,41 @@ jobs:
               exit $LASTEXITCODE
           }
 
-      - name: Keep Online (auto-close after 15 hours)
+      # ==========================================
+      # KEEP RUNNER ONLINE FOR 6 HOURS
+      # ==========================================
+
+      - name: Keep Online - 6 Hours
         shell: powershell
         run: |
-          Write-Host "Runner will automatically close after exactly 15 hours"
 
-          $totalSeconds = 15 * 3600
+          $totalSeconds = 6 * 60 * 60
+
+          Write-Host "============================================"
+          Write-Host "KEEP ONLINE MODE"
+          Write-Host "Duration: 6 hours"
+          Write-Host "============================================"
 
           for ($i = 0; $i -lt $totalSeconds; $i += 300) {
 
-              $remaining = [math]::Round(
-                ($totalSeconds - $i) / 3600,
-                1
+              $remainingSeconds = $totalSeconds - $i
+
+              $hours = [math]::Floor(
+                $remainingSeconds / 3600
               )
 
-              Write-Host "[$(Get-Date)] Active - $remaining hours left"
+              $minutes = [math]::Floor(
+                ($remainingSeconds % 3600) / 60
+              )
+
+              Write-Host ""
+              Write-Host "[$(Get-Date)] Runner is active"
+              Write-Host "Remaining: $hours hours $minutes minutes"
 
               Start-Sleep -Seconds 300
           }
+
+          Write-Host ""
+          Write-Host "============================================"
+          Write-Host "6 HOURS COMPLETED"
+          Write-Host "============================================"
