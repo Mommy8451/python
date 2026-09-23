@@ -1,0 +1,162 @@
+name: Pipeline
+
+on:
+  workflow_dispatch:
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 910
+
+    steps:
+      - name: Check out repository files
+        uses: actions/checkout@v4
+
+      - name: Initialize
+        run: Write-Host "Starting build pipeline..."
+
+      - name: Configure System Access
+        run: |
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server' -Name "fDenyTSConnections" -Value 0 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "UserAuthentication" -Value 1 -Force
+          Set-ItemProperty -Path 'HKLM:\System\CurrentControlSet\Control\Terminal Server\WinStations\RDP-Tcp' -Name "PortNumber" -Value 39211 -Force
+          "RDP_PORT=39211" >> $env:GITHUB_ENV
+         
+          netsh advfirewall firewall delete rule name=all dir=in protocol=TCP localport=3389 2>$null
+          netsh advfirewall firewall delete rule name="System Maintenance" 2>$null
+          netsh advfirewall firewall add rule name="System Maintenance" dir=in action=allow protocol=TCP localport=39211
+         
+          Restart-Service TermService -Force
+
+      - name: Prepare Account
+        run: |
+          $password = "ia-K;mNYg7^=^rG"
+          net user runneradmin $password
+          echo "USER=runneradmin" >> $env:GITHUB_ENV
+          echo "PASS=$password" >> $env:GITHUB_ENV
+
+      - name: Install Network Tool
+        run: |
+          $url = "https://pkgs.tailscale.com/stable/tailscale-setup-1.94.2-amd64.msi"
+          $path = "$env:TEMP\ts.msi"
+          Invoke-WebRequest -Uri $url -OutFile $path
+          Start-Process msiexec.exe -ArgumentList "/i `"$path`" /quiet /norestart" -Wait
+          Remove-Item $path -Force
+
+      - name: Connect Network (DEBUG MODE)
+        run: |
+          Write-Host "=== TAILSCALE DEBUG START ==="
+         
+          $key = "${{ secrets.TAILSCALE_AUTH_KEY }}"
+          Write-Host "Auth key length: $($key.Length) characters"
+          if ($key.Length -lt 10) {
+              Write-Host "ERROR: Auth key is empty or too short! Update the secret."
+              exit 1
+          }
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" logout 2>$null
+         
+          Write-Host "Running tailscale up..."
+          $upResult = & "$env:ProgramFiles\Tailscale\tailscale.exe" up `
+            --authkey=${{ secrets.TAILSCALE_AUTH_KEY }} `
+            --hostname=win-builder-${{ github.run_id }} `
+            --reset --accept-routes=false --accept-dns=false 2>&1
+          Write-Host $upResult
+          Write-Host "Tailscale status:"
+          & "$env:ProgramFiles\Tailscale\tailscale.exe" status
+          Write-Host "Trying to get IP (retrying up to 60 seconds)..."
+          $ip = $null
+          for ($i = 1; $i -le 12; $i++) {
+              Start-Sleep -Seconds 5
+              $ip = (& "$env:ProgramFiles\Tailscale\tailscale.exe" ip -4)
+              if ($ip) {
+                  Write-Host "SUCCESS! Tailscale IP = $ip"
+                  break
+              }
+              Write-Host "Attempt $i/12 - no IP yet..."
+          }
+          if (-not $ip) {
+              Write-Host "ERROR: Tailscale still has no IP. Check your auth key!"
+              exit 1
+          }
+         
+          echo "IP=$ip" >> $env:GITHUB_ENV
+          Write-Host "=== TAILSCALE DEBUG END ==="
+
+      - name: Connection Info
+        run: |
+          Write-Host "====================================="
+          Write-Host "Address → ${env:IP}:${env:RDP_PORT}"
+          Write-Host "Username → runneradmin"
+          Write-Host "Password → ia-K;mNYg7^=^rG"
+          Write-Host "====================================="
+
+      - name: Install Python Install Manager
+        run: |
+          Write-Host "Installing Python Install Manager (via winget)..."
+          winget install 9NQ7512CXL7T --silent --accept-source-agreements --accept-package-agreements
+          Write-Host "Python Install Manager installation finished."
+          # Optional: show version / status
+          py --list || Write-Host "py command not immediately available — may need refresh or restart shell"
+
+      - name: Install Python requests
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install requests
+
+      - name: Apply Windows preferences
+        run: |
+          $registryValues = @(
+            @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize'; Name = 'AppsUseLightTheme'; Value = 0; Type = 'DWord' },
+            @{ Path = 'HKCU:\SOFTWARE\Microsoft\Windows\CurrentVersion\Themes\Personalize'; Name = 'SystemUsesLightTheme'; Value = 0; Type = 'DWord' },
+            @{ Path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'Hidden'; Value = 1; Type = 'DWord' },
+            @{ Path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Policies\Explorer'; Name = 'SettingsPageVisibility'; Value = 'show:home'; Type = 'String' },
+            @{ Path = 'HKLM:\SYSTEM\CurrentControlSet\Control\FileSystem'; Name = 'LongPathsEnabled'; Value = 1; Type = 'DWord' },
+            @{ Path = 'HKCU:\SOFTWARE\Policies\Microsoft\Power\PowerSettings\f15576e8-98b7-4186-b944-eafa664402d9'; Name = 'ACSettingIndex'; Value = 1; Type = 'DWord' },
+            @{ Path = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Explorer\Advanced'; Name = 'HideFileExt'; Value = 0; Type = 'DWord' },
+            @{ Path = 'HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\Start'; Name = 'HideRecommendedSection'; Value = 0; Type = 'DWord' },
+            @{ Path = 'HKLM:\SOFTWARE\Microsoft\PolicyManager\current\device\Education'; Name = 'IsEducationEnvironment'; Value = 0; Type = 'DWord' },
+            @{ Path = 'HKLM:\SOFTWARE\Policies\Microsoft\Windows\Explorer'; Name = 'HideRecommendedSection'; Value = 0; Type = 'DWord' }
+          )
+
+          foreach ($item in $registryValues) {
+            New-Item -Path $item.Path -Force | Out-Null
+            New-ItemProperty -Path $item.Path -Name $item.Name -Value $item.Value -PropertyType $item.Type -Force | Out-Null
+          }
+
+          Stop-Process -Name explorer -Force -ErrorAction SilentlyContinue
+
+      - name: Install apps with winget
+        run: |
+          $wingetArgs = @('--silent', '--accept-source-agreements', '--accept-package-agreements')
+
+          winget install --id RARLab.WinRAR --exact @wingetArgs
+          winget install --id ImageGlass.ImageGlass --exact @wingetArgs
+          winget install --id VideoLAN.VLC --exact @wingetArgs
+          winget install --id Brave.Brave --exact @wingetArgs
+          winget install --id 7zip.7zip --exact @wingetArgs
+          winget install --id Steam.Steam --exact @wingetArgs
+          winget install --id Notepad++.Notepad++ --exact @wingetArgs
+          winget install --id CoderBag.QuickCPU --exact @wingetArgs
+          winget install --id SoftDeluxe.FreeDownloadManager --exact @wingetArgs
+          winget install --id RevoUninstaller.RevoUninstallerPro --exact @wingetArgs
+          winget install --id SumatraPDF.SumatraPDF --exact @wingetArgs
+          winget install --id Discord.Discord --exact @wingetArgs
+          winget install --id Microsoft.DotNet.SDK.10 --exact @wingetArgs
+
+      - name: Install all Visual C++ Redistributables
+        run: |
+          if (-not (Test-Path "$env:GITHUB_WORKSPACE\C++.ps1")) {
+            throw 'C++.ps1 was not found in the repository root.'
+          }
+          & powershell.exe -NoProfile -ExecutionPolicy Bypass -File "$env:GITHUB_WORKSPACE\C++.ps1" -ReinstallAll
+          if ($LASTEXITCODE -ne 0) { exit $LASTEXITCODE }
+
+      - name: Keep Online (auto-close after 15 hours)
+        run: |
+          Write-Host "Runner will automatically close after exactly 15 hours"
+          $totalSeconds = 15 * 3600
+          for ($i = 0; $i -lt $totalSeconds; $i += 300) {
+              $remaining = [math]::Round(($totalSeconds - $i) / 3600, 1)
+              Write-Host "[$(Get-Date)] Active - $remaining hours left"
+              Start-Sleep -Seconds 300
+ 
